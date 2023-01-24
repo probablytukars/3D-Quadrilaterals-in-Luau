@@ -1,8 +1,6 @@
 local libs = script.Parent
 local triangle = require(libs.Triangle)
 local vectors = require(libs.Vectors)
-local math2 = require(libs.Math2)
-local tables = require(libs.Tables)
 
 local quadrilateral = {}
 
@@ -91,7 +89,6 @@ local function isSelfIntersecting(positions)
 	local vertices = {p1, p2, p3, p4}
 	for i = 1, 2 do
 		local v1, v2, v3, v4 = vertices[1], vertices[2 * i], vertices[-i + 4], vertices[-i + 5]
-		print(1, 2 * i, -i + 4, -i + 5)
 		local intersects, intersection = lineIntersection(v1, v2, v3, v4)
 		if intersects then
 			return true, intersection, {v1, v2, v3, v4}
@@ -108,7 +105,7 @@ local function getReflexAndOpposite(positions)
 	local r1, r2, o1, o2 = pos[1], pos[2], pos[3], pos[4]
 	local angles = {}
 	for i = 1, 4 do
-		local pin, nin = tables.indexWrapped(i-1, 4), tables.indexWrapped(i+1, 4)
+		local pin, nin = (i-2)%4 + 1, (i)%4 + 1
 		local a, b, c = pos[pin], pos[i], pos[nin]
 		local v1, v2 = (a - b), (c - b)
 		table.insert(angles, math.acos(v1:Dot(v2) / (v1.magnitude * v2.magnitude)))
