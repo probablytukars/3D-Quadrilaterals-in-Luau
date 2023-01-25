@@ -9,41 +9,40 @@ local function triangleUpVector(a, b, c)
 end
 
 local function getGridPoints(positions, resolution)
+	local p1, p2, p3, p4 = positions[1], positions[2], positions[3], positions[4]
 	local gridPositions = {}
 	for i = 0, resolution.X do
-		local axisPositions = {}
 		local alphaOut = i / resolution.X
-		local op1 = positions.p1:Lerp(positions.p2, alphaOut)
-		local op2 = positions.p4:Lerp(positions.p3, alphaOut)
+		local op1 = p1:Lerp(p2, alphaOut)
+		local op2 = p4:Lerp(p3, alphaOut)
 		for j = 0, resolution.Y do
-			table.insert(axisPositions, op1:Lerp(op2, j / resolution.Y))
+			table.insert(gridPositions, op1:Lerp(op2, j / resolution.Y))
 		end
-		table.insert(gridPositions, axisPositions)
 	end
 	return gridPositions
 end
 
 local function getPlane(positions, uv)
-	local p1, p2, p3, p4 = positions.p1, positions.p2, positions.p3, positions.p4
+	local p1, p2, p3, p4 = positions[1], positions[2], positions[3], positions[4]
 	local centroid = (((p1 + p3) / 2) + ((p2 + p4) / 2)) / 2
 	local s1 = quadrilateral.surfaceNormal(positions)
 	return centroid, s1
 end
 
 local function getQuadDrawDirection(centroid, surfaceNormal, positions)
-	local h1 = vectors.heightFromPlane(centroid, surfaceNormal, positions.p1)
-	local h2 = vectors.heightFromPlane(centroid, surfaceNormal, positions.p2)
+	local h1 = vectors.heightFromPlane(centroid, surfaceNormal, positions[1])
+	local h2 = vectors.heightFromPlane(centroid, surfaceNormal, positions[2])
 	return h1 > h2
 end
 
 local function getQuadrilateralSurface(gridPositions, resolution, direction)
 	local triangles = {}
 	for i = 1, resolution.X do
-		local rowFirst = gridPositions[i]
-		local rowSecond = gridPositions[i + 1]
-		for j = 1, resolution.Y do
-			local p1, p2 = rowFirst[j], rowFirst[j + 1]
-			local p4, p3 = rowSecond[j], rowSecond[j + 1]
+		for j = 0, resolution.Y - 2 do
+			local row1 = (resolution.Y * i) - (resolution.Y - 1) + j
+			local row2 = (resolution.Y * i) + 1 + j
+			local p1, p2 = row1, row1 + 1
+			local p4, p3 = row2, row2 + 1
 			if direction then
 				table.insert(triangles, {p1, p2, p3})
 				table.insert(triangles, {p1, p3, p4})
@@ -53,15 +52,16 @@ local function getQuadrilateralSurface(gridPositions, resolution, direction)
 			end
 		end
 	end
-	return triangles
+
 end
 
-local function lineIntersection(p1, p2, p3, p4)
+local function lineIntersection(p1, p2, p3, p4, maxDistance, epsilon)
+	if not maxDistance then maxDistance = 1e-5 end
 	local p13 = p1 - p3
 	local p43 = p4 - p3
 	local p21 = p2 - p1
 	
-	if p43.magnitude < 1e-5 or p21.magnitude < 1e-5 then
+	if p43.magnitude < epsilon or p21.magnitude < epsilon then
 		return false
 	end
 	
@@ -69,7 +69,7 @@ local function lineIntersection(p1, p2, p3, p4)
 	local d4343, d2121 = p43:Dot(p43), p21:Dot(p21)
 	local denom = d2121 * d4343 - d4321 * d4321
 	
-	if math.abs(denom) < 1e-5 then
+	if math.abs(denom) < epsilon then
 		return false
 	end
 	
@@ -77,94 +77,105 @@ local function lineIntersection(p1, p2, p3, p4)
 	local mua = numer / denom
 	local mub = (d1343 + d4321 * mua) / d4343
 	
-	if (mua >= 0 and mua <= 1) and (mub >= 0 and mub <= 1) then
-		local intersection = p1 + mua * p21
-		return true, intersection
+	local pA = p1 + mua * p21
+	local pB = p3 + mub * p43
+	local distance = (pA - pB).magnitude
+	
+	if distance <= maxDistance then
+		if (mua >= 0 and mua <= 1) and (mub >= 0 and mub <= 1) then
+			return true, (pA + pB) / 2
+		end
 	end
 	return false
 end
 
-local function isSelfIntersecting(positions)
-	local p1, p2, p3, p4 = positions.p1, positions.p2, positions.p3, positions.p4
-	local vertices = {p1, p2, p3, p4}
+local function isSelfIntersecting(positions, epsilon)
 	for i = 1, 2 do
-		local v1, v2, v3, v4 = vertices[1], vertices[2 * i], vertices[-i + 4], vertices[-i + 5]
-		local intersects, intersection = lineIntersection(v1, v2, v3, v4)
+		local v1, v2, v3, v4 = positions[1], positions[2 * i], positions[-i + 4], positions[-i + 5]
+		local intersects, intersection = lineIntersection(v1, v2, v3, v4, 1e-5, epsilon)
 		if intersects then
-			return true, intersection, {v1, v2, v3, v4}
+			local p1, p2, p3, p4 = positions[1], positions[-2 * i + 6], positions[i + 1], positions[i + 2]
+			return true, {p1, p2, p3, p4, intersection}
 		end
 	end
 	return false
 end
 
 local function getReflexAndOpposite(positions)
-	local p1, p2, p3, p4 = positions.p1, positions.p2, positions.p3, positions.p4
-	local pos = {positions.p1, positions.p2, positions.p3, positions.p4}
-	local concave = false
+	local r1, r2, o1, o2 = positions[1], positions[2], positions[3], positions[4]
 	
-	local r1, r2, o1, o2 = pos[1], pos[2], pos[3], pos[4]
-	local angles = {}
-	for i = 1, 4 do
-		local pin, nin = (i-2)%4 + 1, (i)%4 + 1
-		local a, b, c = pos[pin], pos[i], pos[nin]
-		local v1, v2 = (a - b), (c - b)
-		table.insert(angles, math.acos(v1:Dot(v2) / (v1.magnitude * v2.magnitude)))
-	end
+	local concave = false
+	local angles = quadrilateral.getAngles(positions)
 	
 	for i = 1,4 do
 		local pa, ca, na = angles[((i - 2) % 4) + 1], angles[i], angles[(i % 4) + 1]
 		if ca > pa and ca > na then
-			r1 = pos[i]
-			r2 = pos[(i % 4) + 1]
-			o1 = pos[((i + 1) % 4) + 1]
-			o2 = pos[((i + 2) % 4) + 1]
+			r1 = positions[i]
+			r2 = positions[(i % 4) + 1]
+			o1 = positions[((i + 1) % 4) + 1]
+			o2 = positions[((i + 2) % 4) + 1]
 			concave = true
 		end
 	end
 	return r1, r2, o1, o2, concave
 end
 
+function quadrilateral.getAngles(positions)
+	local r1, r2, o1, o2 = positions[1], positions[2], positions[3], positions[4]
+	local angles = {}
+	for i = 1, 4 do
+		local pin, nin = (i-2)%4 + 1, (i)%4 + 1
+		local a, b, c = positions[pin], positions[i], positions[nin]
+		local v1, v2 = (a - b), (c - b)
+		table.insert(angles, math.acos(v1:Dot(v2) / (v1.magnitude * v2.magnitude)))
+	end
+	return angles
+end
+
 function quadrilateral.surfaceNormal(positions)
-	local p1, p2, p3, p4 = positions.p1, positions.p2, positions.p3, positions.p4
+	local p1, p2, p3, p4 = positions[1], positions[2], positions[3], positions[4]
 	local n1, n2 = triangleUpVector(p1, p2, p3), triangleUpVector(p1, p3, p4)
 	return vectors.slerp(n1, n2, 0.5)
 end
 
 function quadrilateral.getSurfacePoints(positions, resolution, epsilon)
-	local p1, p2, p3, p4 = positions.p1, positions.p2, positions.p3, positions.p4
+	if not epsilon then epsilon = 1e-10 end
+	local p1, p2, p3, p4 = positions[1], positions[2], positions[3], positions[4]
 	local isCollinear = vectors.isCollinear(epsilon, p1, p2, p3, p4)
 	if isCollinear then
 		return nil
 	end
-	local direction = nil
-	local triangles = nil
+	local verti, triangles
 	
 	local isPlanar, planeNormal = vectors.isCoplanar(epsilon, p1, p2, p3, p4)
 	if isPlanar then
-		local intersects, intersection, vertices = isSelfIntersecting(positions)
+		local intersects, vertices = isSelfIntersecting(positions, epsilon)
 		if intersects then
-			triangles = {{vertices[1], vertices[4], intersection}, {vertices[2], vertices[3], intersection}}
+			verti = vertices
+			triangles = {{1, 2, 5}, {3, 4, 5}}
 		else
-			local r1, r2, o1, o2, concave = getReflexAndOpposite(positions)
-			triangles = {{r1, r2, o1}, {r1, o1, o2}}
+			local r1, r2, o1, o2 = getReflexAndOpposite(positions)
+			verti = {r1, r2, o1, o2}
+			triangles = {{1, 2, 3}, {1, 3, 4}}
 		end
 	else
 		local centroid, surfaceNormal = getPlane(positions)
 		local direction = getQuadDrawDirection(centroid, surfaceNormal, positions)
-		local gridPositions = getGridPoints(positions, resolution)
-		triangles = getQuadrilateralSurface(gridPositions, resolution, direction)
+		verti = getGridPoints(positions, resolution)
+		triangles = getQuadrilateralSurface(verti, resolution, direction)
 	end
-	return triangles, isPlanar, direction
+	return verti, triangles
 end
 
 
 function quadrilateral.drawQuadrilateral(positions, resolution, props, parent, epsilon)
-	if not epsilon then epsilon = 1e-5 end
-	local triangles, isPlanar, direction = quadrilateral.getSurfacePoints(positions, resolution, epsilon)
-	if triangles then
+	if not epsilon then epsilon = 1e-10 end
+	local vertices, triangles = quadrilateral.getSurfacePoints(positions, resolution, epsilon)
+	if vertices then
 		for _, tri in pairs(triangles) do
 			local a, b, c = unpack(tri)
-			triangle.draw(a, b, c, 0, 1, props, parent)
+			local p1, p2, p3 = vertices[a], vertices[b], vertices[c]
+			triangle.draw(p1, p2, p3, 0, 1, props, parent)
 		end
 	else
 		return nil
