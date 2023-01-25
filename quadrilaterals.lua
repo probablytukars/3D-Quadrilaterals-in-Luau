@@ -1,6 +1,7 @@
 local libs = script.Parent
 local triangle = require(libs.Triangle)
 local vectors = require(libs.Vectors)
+local debugger = require(libs.Debugger)
 
 local quadrilateral = {}
 
@@ -38,9 +39,9 @@ end
 local function getQuadrilateralSurface(gridPositions, resolution, direction)
 	local triangles = {}
 	for i = 1, resolution.X do
-		for j = 0, resolution.Y - 2 do
-			local row1 = (resolution.Y * i) - (resolution.Y - 1) + j
-			local row2 = (resolution.Y * i) + 1 + j
+		for j = 0, resolution.Y - 1 do
+			local row1 = ((resolution.Y + 1) * i) - (resolution.Y) + j
+			local row2 = ((resolution.Y + 1) * i) + 1 + j
 			local p1, p2 = row1, row1 + 1
 			local p4, p3 = row2, row2 + 1
 			if direction then
@@ -52,7 +53,7 @@ local function getQuadrilateralSurface(gridPositions, resolution, direction)
 			end
 		end
 	end
-
+	return triangles
 end
 
 local function lineIntersection(p1, p2, p3, p4, maxDistance, epsilon)
